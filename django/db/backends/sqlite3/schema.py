@@ -78,7 +78,14 @@ class DatabaseSchemaEditor(BaseDatabaseSchemaEditor):
             del body[old_field.name]
             del mapping[old_field.column]
             body[new_field.name] = new_field
-            mapping[new_field.column] = self.quote_name(old_field.column)
+            if old_field.null and not new_field.null:
+                case_sql = "coalesce(%(col)s, %(default)s)" % {
+                    'col': self.quote_name(old_field.column),
+                    'default': self.quote_value(self.effective_default(new_field))
+                }
+                mapping[new_field.column] = case_sql
+            else:
+                mapping[new_field.column] = self.quote_name(old_field.column)
             rename_mapping[old_field.name] = new_field.name
         # Remove any deleted fields
         for field in delete_fields:
@@ -172,9 +179,13 @@ class DatabaseSchemaEditor(BaseDatabaseSchemaEditor):
             # For explicit "through" M2M fields, do nothing
         # For everything else, remake.
         else:
+            # It might not actually have a column behind it
+            if field.db_parameters(connection=self.connection)['type'] is None:
+                return
             self._remake_table(model, delete_fields=[field])
 
-    def _alter_field(self, model, old_field, new_field, old_type, new_type, old_db_params, new_db_params, strict=False):
+    def _alter_field(self, model, old_field, new_field, old_type, new_type,
+                     old_db_params, new_db_params, strict=False):
         """Actually perform a "physical" (non-ManyToMany) field update."""
         # Alter by remaking table
         self._remake_table(model, alter_fields=[(old_field, new_field)])
